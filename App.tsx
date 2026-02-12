@@ -8,6 +8,7 @@ import ProfileSetup from './components/ProfileSetup';
 import Leaderboard from './components/Leaderboard';
 import GroupSelector from './components/GroupSelector';
 import Rules from './components/Rules';
+import { supabase } from './supabase';
 
 const App: React.FC = () => {
   const [lang, setLang] = useState<Language>('pt');
@@ -64,13 +65,47 @@ const App: React.FC = () => {
       localStorage.setItem('wc_groups_db', JSON.stringify(MOCK_GROUPS));
     }
 
-    // Simulate fetching scoring rules from database
-    const savedRules = localStorage.getItem('wc_scoring_rules');
-    if (savedRules) {
-      setScoringRules(JSON.parse(savedRules));
-    } else {
-      localStorage.setItem('wc_scoring_rules', JSON.stringify(INITIAL_SCORING_RULES));
-    }
+    // Fetch scoring rules from Supabase
+    const fetchScoringRules = async () => {
+      try {
+        console.log('🔄 Fetching scoring rules from Supabase...');
+        console.log('Supabase URL:', import.meta.env.VITE_SUPABASE_URL);
+        
+        const { data, error } = await supabase
+          .from('scoring_rules')
+          .select('exact, diff, outcome, one_score')
+          .eq('id', 'current')
+          .single();
+
+        console.log('📡 Supabase Response:');
+        console.log('  - Data:', data);
+        console.log('  - Error:', error);
+
+        if (error) {
+          console.error('❌ Supabase Error:', error);
+          throw error;
+        }
+
+        if (data) {
+          console.log('✅ Successfully fetched scoring rules:', data);
+          setScoringRules({
+            exact: data.exact,
+            diff: data.diff,
+            outcome: data.outcome,
+            oneScore: data.one_score
+          });
+        } else {
+          console.warn('⚠️ Data is null or empty');
+          setScoringRules(INITIAL_SCORING_RULES);
+        }
+      } catch (err) {
+        console.error('❌ Failed to fetch scoring rules:', err);
+        console.log('📌 Falling back to defaults');
+        setScoringRules(INITIAL_SCORING_RULES);
+      }
+    };
+
+    fetchScoringRules();
   }, []);
 
   const handleLogin = (loggedUser: User) => {

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, Language, Prediction, Match, Group, UserGroup } from './types';
-import { TRANSLATIONS, MOCK_MATCHES, MOCK_GROUPS } from './constants';
+import { User, Language, Prediction, Match, Group, UserGroup, ScoringConfig } from './types';
+import { TRANSLATIONS, MOCK_MATCHES, MOCK_GROUPS, SCORING_RULES as INITIAL_SCORING_RULES } from './constants';
 import Login from './components/Auth';
 import MatchList from './components/MatchList';
 import ProfileSetup from './components/ProfileSetup';
@@ -15,6 +15,7 @@ const App: React.FC = () => {
   const [showProfileSetup, setShowProfileSetup] = useState(false);
   const [activeTab, setActiveTab] = useState<'matches' | 'ranking' | 'groups' | 'rules'>('matches');
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
+  const [scoringRules, setScoringRules] = useState<ScoringConfig>(INITIAL_SCORING_RULES);
 
   const t = TRANSLATIONS[lang];
 
@@ -60,17 +61,15 @@ const App: React.FC = () => {
     
     // Initialize mock groups in DB if not exists
     if (!localStorage.getItem('wc_groups_db')) {
-      const groupsWithFullStructure: Group[] = MOCK_GROUPS.map(g => ({
-        ...g,
-        initials: g.name.substring(0, 2).toUpperCase(),
-        languageDefault: 'pt',
-        ownerUserId: 'system',
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        isPrivate: false,
-        status: 'ACTIVE'
-      }));
-      localStorage.setItem('wc_groups_db', JSON.stringify(groupsWithFullStructure));
+      localStorage.setItem('wc_groups_db', JSON.stringify(MOCK_GROUPS));
+    }
+
+    // Simulate fetching scoring rules from database
+    const savedRules = localStorage.getItem('wc_scoring_rules');
+    if (savedRules) {
+      setScoringRules(JSON.parse(savedRules));
+    } else {
+      localStorage.setItem('wc_scoring_rules', JSON.stringify(INITIAL_SCORING_RULES));
     }
   }, []);
 
@@ -129,12 +128,10 @@ const App: React.FC = () => {
   const handleCreateGroup = (newGroup: Group) => {
     if (!user) return;
     
-    // Save group to groups DB
     const allGroups = JSON.parse(localStorage.getItem('wc_groups_db') || '[]');
     allGroups.push(newGroup);
     localStorage.setItem('wc_groups_db', JSON.stringify(allGroups));
 
-    // Create Membership (UserGroup)
     const membership: UserGroup = {
       id: `ug_${Date.now()}`,
       userId: user.email,
@@ -147,7 +144,6 @@ const App: React.FC = () => {
     memberships.push(membership);
     localStorage.setItem('wc_memberships_db', JSON.stringify(memberships));
 
-    // Update User locally
     const updatedUser = {
       ...user,
       groupIds: [...user.groupIds, newGroup.id]
@@ -155,7 +151,6 @@ const App: React.FC = () => {
     setUser(updatedUser);
     localStorage.setItem('wc_user', JSON.stringify(updatedUser));
     
-    // Update Global Users DB
     const users = JSON.parse(localStorage.getItem('wc_users_db') || '[]');
     const index = users.findIndex((u: any) => u.email === user.email);
     if (index !== -1) {
@@ -170,7 +165,6 @@ const App: React.FC = () => {
     if (!user) return;
     if (user.groupIds.includes(groupId)) return;
     
-    // Create Membership
     const membership: UserGroup = {
       id: `ug_${Date.now()}`,
       userId: user.email,
@@ -204,7 +198,6 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 pb-32 flex flex-col">
-      {/* Header */}
       <header className="bg-white/80 backdrop-blur-md shadow-sm sticky top-0 z-50 px-4 py-3 flex justify-between items-center border-b border-slate-100">
         <div className="flex items-center gap-3">
           <div className="relative w-10 h-10 flex items-center justify-center cursor-pointer" onClick={() => setActiveTab('matches')}>
@@ -347,13 +340,12 @@ const App: React.FC = () => {
             )}
 
             {activeTab === 'rules' && (
-              <Rules lang={lang} />
+              <Rules lang={lang} scoringConfig={scoringRules} />
             )}
           </div>
         )}
       </main>
 
-      {/* Bottom Navigation */}
       {user && !showProfileSetup && (
         <nav className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[calc(100%-1rem)] max-w-sm bg-white/90 backdrop-blur-xl border border-slate-200 rounded-3xl shadow-2xl p-1.5 flex gap-1 z-50">
           <button 

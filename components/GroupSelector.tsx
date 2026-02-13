@@ -68,8 +68,24 @@ const GroupSelector: React.FC<GroupSelectorProps> = ({
         return;
       }
 
-      console.log('✅ Groups fetched:', data?.length || 0, 'groups');
-      setAllGroups(data || []);
+      // Map snake_case database columns to camelCase TypeScript types
+      const mappedGroups = (data || []).map((row: any) => ({
+        id: row.id,
+        code: row.code,
+        name: row.name,
+        description: row.description,
+        photoUrl: row.photo_url,
+        initials: row.initials,
+        languageDefault: row.language_default || 'pt',
+        ownerUserId: row.owner_user_id,
+        createdAt: row.created_at ? new Date(row.created_at).getTime() : 0,
+        updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : 0,
+        isPrivate: row.is_private || false,
+        status: row.status || 'ACTIVE'
+      }));
+
+      console.log('✅ Groups fetched:', mappedGroups.length, 'groups');
+      setAllGroups(mappedGroups);
     } catch (err) {
       console.error('❌ Unexpected error fetching groups:', err);
       setAllGroups([]);
@@ -221,7 +237,7 @@ const GroupSelector: React.FC<GroupSelectorProps> = ({
 
       console.log('✅ Group name is available. Creating group...');
 
-      // Get current user ID
+      // Get current user ID with enhanced diagnostics
       const { data: session } = await supabase.auth.getSession();
       if (!session?.session?.user?.id) {
         setError('You must be logged in to create a group.');
@@ -231,6 +247,13 @@ const GroupSelector: React.FC<GroupSelectorProps> = ({
 
       const code = generateGroupCode(allGroups);
       const userId = session.session.user.id;
+      
+      console.log('🔐 Auth Session Debug:');
+      console.log('  User ID:', userId);
+      console.log('  Auth Role:', session.session.user.role);
+      console.log('  Email:', session.session.user.email);
+      console.log('  Session exists:', !!session.session);
+      console.log('  Token exists:', !!session.session.access_token);
 
       // Generate initials from group name
       const generateInitials = (name: string): string => {
@@ -290,8 +313,29 @@ const GroupSelector: React.FC<GroupSelectorProps> = ({
 
       console.log('✅ Group created successfully:', createdGroup);
       
+      // Map database response to TypeScript type
+      const mappedGroup: Group = {
+        id: createdGroup.id,
+        code: createdGroup.code,
+        name: createdGroup.name,
+        description: createdGroup.description,
+        photoUrl: createdGroup.photo_url,
+        initials: createdGroup.initials,
+        languageDefault: createdGroup.language_default || 'pt',
+        ownerUserId: createdGroup.owner_user_id,
+        createdAt: createdGroup.created_at ? new Date(createdGroup.created_at).getTime() : 0,
+        updatedAt: createdGroup.updated_at ? new Date(createdGroup.updated_at).getTime() : 0,
+        isPrivate: createdGroup.is_private || false,
+        status: createdGroup.status || 'ACTIVE'
+      };
+      
       // STEP 2: Add creator as member of the new group
-      console.log('📝 STEP 2: Adding creator to user_groups...');
+      console.log('📝 STEP 2: Adding creator to user_groups with payload:', {
+        user_id: userId,
+        group_id: createdGroup.id,
+        role: 'OWNER',
+        is_active: true
+      });
       const { error: memberError } = await supabase
         .from('user_groups')
         .insert({
@@ -310,7 +354,7 @@ const GroupSelector: React.FC<GroupSelectorProps> = ({
         console.error('🔍 Full Error Object:', JSON.stringify(memberError, null, 2));
         console.error('⚠️ Group was created (ID:', createdGroup.id + '), but creator not added as member');
         console.error('💡 LIKELY CAUSE: RLS policy missing or incorrect on user_groups table');
-        console.error('💡 FIX: Run fix_user_groups_rls.sql in Supabase SQL editor');
+        console.error('💡 FIX: Verify user_groups RLS policies allow INSERT for authenticated users');
         // Continue anyway - the group exists, just the membership failed
         // In production, you'd want to delete the group and retry
       } else {
@@ -318,12 +362,12 @@ const GroupSelector: React.FC<GroupSelectorProps> = ({
       }
       
       // STEP 3: Refresh groups list to show in "My Groups"
-      console.log('🔄 Refreshing groups list...');
+      console.log('🔄 STEP 3: Refreshing groups list...');
       await fetchGroups();
       
       // STEP 4: UPDATE APP STATE - Call onCreateGroup to sync user.groupIds
       console.log('🔄 STEP 4: Updating App.tsx state with new group...');
-      onCreateGroup(createdGroup);
+      onCreateGroup(mappedGroup);
       
       // Reset form
       setNewName('');

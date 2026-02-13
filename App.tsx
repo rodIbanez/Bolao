@@ -108,30 +108,268 @@ const App: React.FC = () => {
     fetchScoringRules();
   }, []);
 
-  const handleLogin = (loggedUser: User) => {
-    setUser(loggedUser);
-    localStorage.setItem('wc_user', JSON.stringify(loggedUser));
-    if (loggedUser.groupIds?.length > 0) {
-      setActiveGroupId(loggedUser.groupIds[0]);
+  const handleLogin = async (loginEmail: string, password: string) => {
+    try {
+      console.log('🔐 Attempting Supabase login...');
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: loginEmail,
+        password: password
+      });
+
+      if (error) throw error;
+
+      if (data?.user?.id) {
+        console.log('✅ Login successful, fetching profile...');
+        
+        // Fetch user profile from profiles table with retry logic
+        let profile = null;
+        let attempts = 0;
+        const maxAttempts = 3;
+
+        while (!profile && attempts < maxAttempts) {
+          const { data: profileData, error: profileError } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', data.user.id)
+            .maybeSingle();
+
+          if (profileError) {
+            console.error('❌ Profile fetch error:', profileError);
+            // Continue retrying even on error
+          }
+
+          if (profileData) {
+            profile = profileData;
+            console.log('✅ Profile fetched successfully');
+            break;
+          }
+
+          attempts++;
+          if (attempts < maxAttempts) {
+            console.log(`⏳ Profile not found yet (attempt ${attempts}/${maxAttempts}). Retrying in 300ms...`);
+            await new Promise(resolve => setTimeout(resolve, 300));
+          }
+        }
+
+        // SELF-HEALING: If profile still missing, create it
+        if (!profile) {
+          console.warn('⚠️ Profile not found after retries. Attempting self-heal (upsert)...');
+          
+          const { data: upsertedProfile, error: upsertError } = await supabase
+            .from('profiles')
+            .upsert(
+              {
+                id: data.user.id,
+                email: data.user.email || loginEmail,
+                name: data.user.user_metadata?.name || 'User',
+                surname: data.user.user_metadata?.surname || '',
+                updated_at: new Date()
+              },
+              { onConflict: 'id' }
+            )
+            .select()
+            .maybeSingle();
+
+          if (upsertError) {
+            console.error('❌ Self-heal upsert failed:', upsertError);
+            throw upsertError;
+          }
+
+          if (upsertedProfile) {
+            profile = upsertedProfile;
+            console.log('✅ Profile self-healed (upserted successfully)');
+          }
+        }
+
+        if (!profile) {
+          throw new Error('Could not fetch or create profile');
+        }
+
+        const loggedUser: User = {
+          email: profile.email,
+          name: profile.name || 'User',
+          surname: profile.surname || '',
+          preferredTeam: profile.preferred_team || '',
+          groupIds: [],
+          predictions: {}
+        };
+
+        setUser(loggedUser);
+        localStorage.setItem('wc_user', JSON.stringify(loggedUser));
+        
+        if (loggedUser.groupIds?.length > 0) {
+          setActiveGroupId(loggedUser.groupIds[0]);
+        }
+      }
+    } catch (err) {
+      console.error('❌ Login failed:', err);
+      throw err;
     }
   };
 
-  const handleRegister = (email: string) => {
-    const newUser: Partial<User> = { email, predictions: {}, groupIds: [] };
-    setUser(newUser as User);
-    setShowProfileSetup(true);
+  const handleRegister = async (registerEmail: string, password: string, name: string, surname: string) => {
+    try {
+      console.log('📝 Attempting Supabase signup...');
+      
+      const { data, error } = await supabase.auth.signUp({
+        email: registerEmail,
+        password: password,
+        options: {
+          data: {
+            name: name,
+            surname: surname
+          }
+        }
+      });
+
+      if (error) {
+        console.error('❌ Signup error:', error);
+        throw error;
+      }
+
+      if (!data?.user?.id) {
+        throw new Error('Signup failed: No user ID returned');
+      }
+
+      console.log('✅ Signup successful. User created:', data.user.id);
+
+      // SCENARIO CHECK: Does the user have an active session?
+      if (data.session) {
+        // ✅ DEV MODE: Email confirmation is DISABLED
+        // User is immediately authenticated. Fetch and login.
+        console.log('🟢 DEV MODE: Email auto-confirmed. Auto-logging in...');
+        
+        // Retry logic to handle race condition with trigger
+        let profile = null;
+        let attempts = 0;
+        const maxAttempts = 5;
+
+        while (!profile && attempts < maxAttempts) {
+          // Use maybeSingle() instead of single() to gracefully handle 0 rows
+          const { data: profileData, error: fetchError } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', data.user.id)
+            .maybeSingle();
+
+          if (fetchError) {
+            console.error('⚠️ Profile fetch error:', fetchError);
+            // Don't throw, just retry
+          }
+
+          if (profileData) {
+            profile = profileData;
+            console.log('✅ Profile fetched after attempt', attempts + 1);
+            break;
+          }
+
+          attempts++;
+          if (attempts < maxAttempts) {
+            const delay = 200 * attempts; // Progressive backoff: 200ms, 400ms, 600ms, 800ms
+            console.log(`⏳ Profile not found yet (attempt ${attempts}/${maxAttempts}). Retrying in ${delay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
+        }
+
+        // SELF-HEALING: If profile still missing after retries, manually create it
+        if (!profile) {
+          console.warn('⚠️ Profile not found after retries. Attempting self-heal (upsert)...');
+          
+          const { data: upsertedProfile, error: upsertError } = await supabase
+            .from('profiles')
+            .upsert(
+              {
+                id: data.user.id,
+                email: registerEmail,
+                name: name || 'User',
+                surname: surname || '',
+                updated_at: new Date()
+              },
+              { onConflict: 'id' }
+            )
+            .select()
+            .maybeSingle();
+
+          if (upsertError) {
+            console.error('❌ Self-heal upsert failed:', upsertError);
+            console.error('Full error details:', JSON.stringify(upsertError));
+            // Continue anyway - user is authenticated, just profile might be missing
+          }
+
+          if (upsertedProfile) {
+            profile = upsertedProfile;
+            console.log('✅ Profile self-healed (upserted successfully)');
+          }
+        }
+
+        // Use the fetched profile or fallback data
+        const newUser: User = {
+          email: profile?.email || registerEmail,
+          name: profile?.name || name || 'User',
+          surname: profile?.surname || surname || '',
+          preferredTeam: profile?.preferred_team || '',
+          groupIds: [],
+          predictions: {}
+        };
+        
+        setUser(newUser);
+        setShowProfileSetup(true);
+        console.log('✅ User logged in and setup initiated');
+      } else {
+        // ⚠️ PROD MODE: Email confirmation is ENABLED
+        // User account created but NOT authenticated. Must verify email first.
+        console.log('🔴 PROD MODE: Email verification required. Showing confirmation message...');
+        
+        alert(
+          `✅ Registration Successful!\n\n` +
+          `We've sent a confirmation email to:\n${registerEmail}\n\n` +
+          `Please check your email and click the confirmation link to complete your registration.\n\n` +
+          `After confirming, you'll be able to login.`
+        );
+        
+        // Optionally: Redirect to login or show a pending verification screen
+        // For now, just clear the form and reset to login view
+        setShowProfileSetup(false);
+      }
+    } catch (err: any) {
+      console.error('❌ Signup failed:', err);
+      throw err;
+    }
   };
 
-  const handleProfileComplete = (profileData: Partial<User>) => {
-    const completeUser = { ...user, ...profileData, groupIds: [] } as User;
-    setUser(completeUser);
-    localStorage.setItem('wc_user', JSON.stringify(completeUser));
-    setShowProfileSetup(false);
-    setActiveTab('groups');
+  const handleProfileComplete = async (profileData: Partial<User>) => {
+    try {
+      if (!user?.email) return;
 
-    const users = JSON.parse(localStorage.getItem('wc_users_db') || '[]');
-    users.push(completeUser);
-    localStorage.setItem('wc_users_db', JSON.stringify(users));
+      console.log('💾 Updating profile in Supabase...');
+
+      const { data: session } = await supabase.auth.getSession();
+      if (!session?.session?.user?.id) throw new Error('No authenticated user');
+
+      // Update the profiles table
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          name: profileData.name,
+          surname: profileData.surname,
+          preferred_team: profileData.preferredTeam,
+          updated_at: new Date()
+        })
+        .eq('id', session.session.user.id);
+
+      if (error) throw error;
+
+      console.log('✅ Profile updated successfully');
+
+      const completeUser = { ...user, ...profileData, groupIds: [] } as User;
+      setUser(completeUser);
+      localStorage.setItem('wc_user', JSON.stringify(completeUser));
+      setShowProfileSetup(false);
+      setActiveTab('groups');
+    } catch (err) {
+      console.error('❌ Profile update failed:', err);
+      throw err;
+    }
   };
 
   const handleLogout = () => {

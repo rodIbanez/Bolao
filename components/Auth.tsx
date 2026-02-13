@@ -5,40 +5,46 @@ import { TRANSLATIONS } from '../constants';
 
 interface AuthProps {
   lang: Language;
-  onLogin: (user: User) => void;
-  onRegister: (email: string) => void;
+  onLogin: (email: string, password: string) => Promise<void>;
+  onRegister: (email: string, password: string, name: string, surname: string) => Promise<void>;
 }
 
 const Auth: React.FC<AuthProps> = ({ lang, onLogin, onRegister }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [surname, setSurname] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const t = TRANSLATIONS[lang];
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setLoading(true);
 
-    if (!email || !password) return;
-
-    const users = JSON.parse(localStorage.getItem('wc_users_db') || '[]');
-
-    if (isLogin) {
-      const found = users.find((u: User) => u.email === email && password === '123456');
-      if (found) {
-        onLogin(found);
-      } else {
+    try {
+      if (!email || !password) {
         setError(t.invalidCredentials);
+        return;
       }
-    } else {
-      const exists = users.some((u: User) => u.email === email);
-      if (exists) {
-        setError(t.alreadyRegistered);
+
+      if (isLogin) {
+        await onLogin(email, password);
       } else {
-        onRegister(email);
+        if (!name) {
+          setError('Please enter your name');
+          return;
+        }
+        await onRegister(email, password, name, surname);
       }
+    } catch (err: any) {
+      setError(err?.message || 'An error occurred');
+      console.error('Auth error:', err);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -93,6 +99,35 @@ const Auth: React.FC<AuthProps> = ({ lang, onLogin, onRegister }) => {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-5">
+            {!isLogin && (
+              <>
+                <div className="space-y-1">
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">
+                    {t.name || 'Name'}
+                  </label>
+                  <input 
+                    type="text" 
+                    required={!isLogin}
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all font-medium text-slate-800"
+                    placeholder="Your first name"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">
+                    {t.surname || 'Surname'}
+                  </label>
+                  <input 
+                    type="text" 
+                    value={surname}
+                    onChange={(e) => setSurname(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all font-medium text-slate-800"
+                    placeholder="Your last name"
+                  />
+                </div>
+              </>
+            )}
             <div className="space-y-1">
               <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">
                 {t.email}
@@ -131,9 +166,10 @@ const Auth: React.FC<AuthProps> = ({ lang, onLogin, onRegister }) => {
 
             <button 
               type="submit"
-              className="group relative w-full bg-slate-900 hover:bg-black text-white font-black py-4.5 rounded-2xl shadow-xl transition-all transform active:scale-[0.97] overflow-hidden"
+              disabled={loading}
+              className="group relative w-full bg-slate-900 hover:bg-black disabled:opacity-50 disabled:cursor-not-allowed text-white font-black py-4.5 rounded-2xl shadow-xl transition-all transform active:scale-[0.97] overflow-hidden"
             >
-              <span className="relative z-10">{isLogin ? t.login : t.register}</span>
+              <span className="relative z-10">{loading ? 'Loading...' : (isLogin ? t.login : t.register)}</span>
               <div className="absolute inset-0 bg-gradient-to-r from-blue-600 via-red-500 to-green-600 opacity-0 group-hover:opacity-10 transition-opacity"></div>
             </button>
           </form>

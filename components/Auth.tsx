@@ -6,15 +6,13 @@ import { TRANSLATIONS } from '../constants';
 interface AuthProps {
   lang: Language;
   onLogin: (email: string, password: string) => Promise<void>;
-  onRegister: (email: string, password: string, name: string, surname: string) => Promise<void>;
+  onRegister: (email: string, password: string) => Promise<void>;
 }
 
 const Auth: React.FC<AuthProps> = ({ lang, onLogin, onRegister }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
-  const [surname, setSurname] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -34,11 +32,7 @@ const Auth: React.FC<AuthProps> = ({ lang, onLogin, onRegister }) => {
       if (isLogin) {
         await onLogin(email, password);
       } else {
-        if (!name) {
-          setError('Please enter your name');
-          return;
-        }
-        await onRegister(email, password, name, surname);
+        await onRegister(email, password);
       }
     } catch (err: any) {
       setError(err?.message || 'An error occurred');
@@ -99,35 +93,6 @@ const Auth: React.FC<AuthProps> = ({ lang, onLogin, onRegister }) => {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-5">
-            {!isLogin && (
-              <>
-                <div className="space-y-1">
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">
-                    {t.name || 'Name'}
-                  </label>
-                  <input 
-                    type="text" 
-                    required={!isLogin}
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all font-medium text-slate-800"
-                    placeholder="Your first name"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">
-                    {t.surname || 'Surname'}
-                  </label>
-                  <input 
-                    type="text" 
-                    value={surname}
-                    onChange={(e) => setSurname(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all font-medium text-slate-800"
-                    placeholder="Your last name"
-                  />
-                </div>
-              </>
-            )}
             <div className="space-y-1">
               <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">
                 {t.email}

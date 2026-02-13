@@ -207,19 +207,13 @@ const App: React.FC = () => {
     }
   };
 
-  const handleRegister = async (registerEmail: string, password: string, name: string, surname: string) => {
+  const handleRegister = async (registerEmail: string, password: string) => {
     try {
       console.log('📝 Attempting Supabase signup...');
       
       const { data, error } = await supabase.auth.signUp({
         email: registerEmail,
-        password: password,
-        options: {
-          data: {
-            name: name,
-            surname: surname
-          }
-        }
+        password: password
       });
 
       if (error) {
@@ -281,8 +275,6 @@ const App: React.FC = () => {
               {
                 id: data.user.id,
                 email: registerEmail,
-                name: name || 'User',
-                surname: surname || '',
                 updated_at: new Date()
               },
               { onConflict: 'id' }
@@ -305,8 +297,8 @@ const App: React.FC = () => {
         // Use the fetched profile or fallback data
         const newUser: User = {
           email: profile?.email || registerEmail,
-          name: profile?.name || name || 'User',
-          surname: profile?.surname || surname || '',
+          name: profile?.name || 'User',
+          surname: profile?.surname || '',
           preferredTeam: profile?.preferred_team || '',
           groupIds: [],
           predictions: {}

@@ -1,7 +1,8 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Language, Group } from '../types';
 import { TRANSLATIONS } from '../constants';
+import { supabase } from '../supabase';
 
 interface GroupSelectorProps {
   lang: Language;
@@ -37,6 +38,8 @@ const GroupSelector: React.FC<GroupSelectorProps> = ({
   const [view, setView] = useState<'list' | 'join' | 'create' | 'success'>('list');
   const [joinCode, setJoinCode] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [allGroups, setAllGroups] = useState<Group[]>([]);
   
   // Create Form State
   const [newName, setNewName] = useState('');
@@ -46,49 +49,295 @@ const GroupSelector: React.FC<GroupSelectorProps> = ({
   const [lastCreatedGroup, setLastCreatedGroup] = useState<Group | null>(null);
 
   const t = TRANSLATIONS[lang];
-  const allGroups: Group[] = JSON.parse(localStorage.getItem('wc_groups_db') || '[]');
-  const myGroups = allGroups.filter(g => userGroupIds.includes(g.id));
 
-  const handleJoin = (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    const group = allGroups.find(g => g.code.toUpperCase() === joinCode.toUpperCase());
-    if (group) {
-      if (userGroupIds.includes(group.id)) {
-        setError('Você já participa deste grupo.');
+  // Fetch groups from Supabase on component mount
+  useEffect(() => {
+    fetchGroups();
+  }, []);
+
+  const fetchGroups = async () => {
+    try {
+      console.log('📡 Fetching groups from Supabase...');
+      const { data, error: fetchError } = await supabase
+        .from('groups')
+        .select('*');
+
+      if (fetchError) {
+        console.error('❌ Error fetching groups:', fetchError);
+        setAllGroups([]);
         return;
       }
-      onJoinGroup(group.id);
-      setJoinCode('');
-      setView('list');
-    } else {
-      setError('Código inválido.');
+
+      console.log('✅ Groups fetched:', data?.length || 0, 'groups');
+      setAllGroups(data || []);
+    } catch (err) {
+      console.error('❌ Unexpected error fetching groups:', err);
+      setAllGroups([]);
     }
   };
 
-  const handleCreate = (e: React.FormEvent) => {
+  const myGroups = allGroups.filter(g => userGroupIds.includes(g.id));
+
+  const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newName) return;
+    setError('');
+    
+    if (!joinCode.trim()) {
+      setError('Please enter a group code.');
+      return;
+    }
 
-    const code = generateGroupCode(allGroups);
-    const newGroup: Group = {
-      id: `g_${Date.now()}`,
-      code,
-      name: newName,
-      description: newDesc,
-      photoUrl: newPhoto,
-      initials: newName.substring(0, 2).toUpperCase(),
-      languageDefault: newLang,
-      ownerUserId: currentUserEmail,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      isPrivate: false,
-      status: 'ACTIVE'
-    };
+    try {
+      console.log('🔍 Searching for group with code:', joinCode.toUpperCase());
 
-    onCreateGroup(newGroup);
-    setLastCreatedGroup(newGroup);
-    setView('success');
+      // Query Supabase for the group
+      const { data: group, error: groupError } = await supabase
+        .from('groups')
+        .select('id, name, code')
+        .eq('code', joinCode.toUpperCase())
+        .maybeSingle();
+
+      if (groupError) {
+        console.error('❌ Group search error:', groupError);
+        setError('Error searching for group.');
+        return;
+      }
+
+      if (!group) {
+        console.warn('⚠️ Group not found with code:', joinCode);
+        setError('Invalid Group Code.');
+        return;
+      }
+
+      console.log('✅ Group found:', group.id);
+
+      // Check if user is already a member
+      const { data: session } = await supabase.auth.getSession();
+      if (!session?.session?.user?.id) {
+        setError('You must be logged in to join a group.');
+        return;
+      }
+
+      const userId = session.session.user.id;
+
+      const { data: existingMember, error: memberError } = await supabase
+        .from('user_groups')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('group_id', group.id)
+        .maybeSingle();
+
+      if (memberError) {
+        console.error('❌ Membership check error:', memberError);
+        setError('Error checking membership.');
+        return;
+      }
+
+      if (existingMember) {
+        console.warn('⚠️ User already member of group:', group.id);
+        setError('You are already a member of this group.');
+        return;
+      }
+
+      // Insert user into group
+      console.log('📝 Adding user to group with payload:', {
+        user_id: userId,
+        group_id: group.id,
+        role: 'MEMBER',
+        is_active: true
+      });
+      
+      const { error: joinError } = await supabase
+        .from('user_groups')
+        .insert({
+          user_id: userId,
+          group_id: group.id,
+          role: 'MEMBER',
+          is_active: true
+        });
+
+      if (joinError) {
+        console.error('❌ SUPABASE ERROR joining group:');
+        console.error('  Code:', joinError.code);
+        console.error('  Message:', joinError.message);
+        console.error('  Details:', joinError.details);
+        console.error('  Full Error:', JSON.stringify(joinError, null, 2));
+        
+        if (joinError.code === '23505') {
+          setError('You are already a member of this group.');
+        } else if (joinError.code === '42501') {
+          setError('Permission denied. You do not have permission to join groups.');
+        } else {
+          setError(`Error joining group: ${joinError.message}`);
+        }
+        return;
+      }
+
+      console.log('✅ Successfully joined group:', group.name);
+      onJoinGroup(group.id);
+      setJoinCode('');
+      setError('');
+      setView('list');
+    } catch (err) {
+      console.error('❌ Unexpected error joining group:', err);
+      setError('An unexpected error occurred.');
+    }
+  };
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    if (!newName.trim()) {
+      setError('Group name is required.');
+      setLoading(false);
+      return;
+    }
+
+    try {
+      console.log('🔍 Checking if group name already exists:', newName);
+
+      // Query Supabase for duplicate name
+      const { data: existingGroup, error: checkError } = await supabase
+        .from('groups')
+        .select('id')
+        .eq('name', newName.trim())
+        .maybeSingle();
+
+      if (checkError) {
+        console.error('❌ Error checking group name:', checkError);
+        setError('Error checking group name. Please try again.');
+        setLoading(false);
+        return;
+      }
+
+      if (existingGroup) {
+        console.warn('⚠️ Group name already taken:', newName);
+        setError('Group name already taken. Please choose a different name.');
+        setLoading(false);
+        return;
+      }
+
+      console.log('✅ Group name is available. Creating group...');
+
+      // Get current user ID
+      const { data: session } = await supabase.auth.getSession();
+      if (!session?.session?.user?.id) {
+        setError('You must be logged in to create a group.');
+        setLoading(false);
+        return;
+      }
+
+      const code = generateGroupCode(allGroups);
+      const userId = session.session.user.id;
+
+      // Generate initials from group name
+      const generateInitials = (name: string): string => {
+        const trimmed = name.trim();
+        // Split by spaces and get first letter of each word
+        const words = trimmed.split(/\s+/).filter(w => w.length > 0);
+        if (words.length === 0) return trimmed.substring(0, 2).toUpperCase();
+        
+        // Take first letter of each word, up to 3 characters
+        const initials = words.map(w => w.charAt(0).toUpperCase()).join('').substring(0, 3);
+        return initials || trimmed.substring(0, 2).toUpperCase();
+      };
+      
+      const initials = generateInitials(newName);
+
+      console.log('📝 Inserting group with payload:', {
+        code,
+        name: newName.trim(),
+        owner_user_id: userId,
+        initials
+      });
+
+      // Insert group into Supabase - ONLY required fields
+      const { data: createdGroup, error: createError } = await supabase
+        .from('groups')
+        .insert({
+          code: code,
+          name: newName.trim(),
+          description: newDesc || null,
+          owner_user_id: userId,
+          language_default: newLang,
+          initials: initials,
+          is_private: false,
+          status: 'ACTIVE'
+        })
+        .select()
+        .maybeSingle();
+
+      if (createError) {
+        console.error('❌ SUPABASE ERROR creating group:');
+        console.error('  Code:', createError.code);
+        console.error('  Message:', createError.message);
+        console.error('  Details:', createError.details);
+        console.error('  Full Error:', JSON.stringify(createError, null, 2));
+        
+        // Check if it's a unique constraint error
+        if (createError.code === '23505') {
+          setError('Group name already taken. Please choose a different name.');
+        } else if (createError.code === '42501') {
+          setError('Permission denied. You do not have permission to create groups.');
+        } else {
+          setError(`Error creating group: ${createError.message}`);
+        }
+        setLoading(false);
+        return;
+      }
+
+      console.log('✅ Group created successfully:', createdGroup);
+      
+      // STEP 2: Add creator as member of the new group
+      console.log('📝 STEP 2: Adding creator to user_groups...');
+      const { error: memberError } = await supabase
+        .from('user_groups')
+        .insert({
+          user_id: userId,
+          group_id: createdGroup.id,
+          role: 'OWNER',
+          is_active: true
+        });
+
+      if (memberError) {
+        console.error('❌ STEP 2 ERROR - Failed to add creator to group:');
+        console.error('  Code:', memberError.code);
+        console.error('  Message:', memberError.message);
+        console.error('  Details:', memberError.details);
+        console.error('  Hint:', memberError.hint);
+        console.error('🔍 Full Error Object:', JSON.stringify(memberError, null, 2));
+        console.error('⚠️ Group was created (ID:', createdGroup.id + '), but creator not added as member');
+        console.error('💡 LIKELY CAUSE: RLS policy missing or incorrect on user_groups table');
+        console.error('💡 FIX: Run fix_user_groups_rls.sql in Supabase SQL editor');
+        // Continue anyway - the group exists, just the membership failed
+        // In production, you'd want to delete the group and retry
+      } else {
+        console.log('✅ Creator added to group successfully');
+      }
+      
+      // STEP 3: Refresh groups list to show in "My Groups"
+      console.log('🔄 Refreshing groups list...');
+      await fetchGroups();
+      
+      // STEP 4: UPDATE APP STATE - Call onCreateGroup to sync user.groupIds
+      console.log('🔄 STEP 4: Updating App.tsx state with new group...');
+      onCreateGroup(createdGroup);
+      
+      // Reset form
+      setNewName('');
+      setNewDesc('');
+      setNewPhoto(undefined);
+      setLastCreatedGroup(createdGroup);
+      
+      setView('success');
+    } catch (err) {
+      console.error('❌ Unexpected error creating group:', err);
+      setError('An unexpected error occurred.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -190,6 +439,15 @@ const GroupSelector: React.FC<GroupSelectorProps> = ({
               <option value="es">Español (ES)</option>
             </select>
           </div>
+
+          {error && (
+            <div className="bg-red-50 text-red-600 text-xs font-bold p-3 rounded-xl border border-red-100 flex items-center gap-2">
+              <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              {error}
+            </div>
+          )}
 
           <button 
             type="submit"

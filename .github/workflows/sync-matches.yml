@@ -1,0 +1,41 @@
+name: Sync Match Data
+
+on:
+  schedule:
+    # Run every 15 minutes during match days
+    - cron: '*/15 * * * *'
+  
+  # Allow manual trigger from GitHub Actions tab
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Trigger Match Sync API
+        run: |
+          response=$(curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.MATCH_SYNC_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -w "\n%{http_code}" \
+            -s \
+            ${{ secrets.SYNC_ENDPOINT }})
+          
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          
+          echo "Response: $body"
+          
+          if [ "$http_code" -ne 200 ]; then
+            echo "❌ Sync failed with status: $http_code"
+            exit 1
+          fi
+          
+          echo "✅ Sync completed successfully"
+
+      - name: Notify on Failure
+        if: failure()
+        run: |
+          echo "⚠️ Match sync failed. Check logs above."
+          # Add notification logic here (e.g., Discord webhook, Slack, etc.)

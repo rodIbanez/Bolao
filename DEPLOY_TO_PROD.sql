@@ -113,15 +113,17 @@ CREATE POLICY "users_can_insert_groups"
     AND owner_user_id = auth.uid()
   );
 
--- Create SELECT policy: Users can see public groups or groups they own/are members of
+-- Create SELECT policy: Users can see public groups or groups they own
+-- NOTE: Removed subquery to avoid circular dependency during INSERT
+-- Membership checks can be done at application level
 CREATE POLICY "users_can_select_groups"
   ON groups
   FOR SELECT
   USING (
-    is_private = false
-    OR owner_user_id = auth.uid()
-    OR auth.uid() IN (
-      SELECT user_id FROM user_groups WHERE group_id = groups.id
+    auth.role() = 'authenticated'
+    AND (
+      is_private = false
+      OR owner_user_id = auth.uid()
     )
   );
 
@@ -310,22 +312,81 @@ CREATE POLICY "scoring_rules_public_read"
   USING (active = true);
 
 -- =========================================================================
--- STEP 13: CREATE TRIGGER FOR AUTO-CREATING PROFILES
+-- STEP 13: CREATE TRIGGER FOR AUTO-CREATING PROFILES (SMART VERSION)
 -- =========================================================================
--- This function creates a profile when a new user is created in auth.users
+-- This function creates/updates a profile when a new user is created in auth.users
+-- Improved to:
+-- 1. Extract full_name and split into name/surname
+-- 2. Try first_name/last_name if available
+-- 3. Capture preferred_team from metadata
+-- 4. Smart conflict resolution (only update if value improves)
+
 CREATE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
+DECLARE
+  v_name TEXT;
+  v_surname TEXT;
+  v_full_name TEXT;
+  v_name_parts TEXT[];
 BEGIN
-  INSERT INTO public.profiles (id, email, name)
+  -- Extract full name from various possible metadata fields
+  v_full_name := COALESCE(
+    NEW.raw_user_meta_data->>'full_name',
+    NEW.raw_user_meta_data->>'name',
+    NEW.raw_user_meta_data->>'fullName',
+    NULL
+  );
+
+  -- If we have a full name, split it
+  IF v_full_name IS NOT NULL AND v_full_name != '' THEN
+    -- Split by space: first part is name, rest is surname
+    v_name_parts := string_to_array(TRIM(v_full_name), ' ');
+    v_name := v_name_parts[1];
+    
+    -- Join remaining parts as surname (if more than one word)
+    IF array_length(v_name_parts, 1) > 1 THEN
+      v_surname := array_to_string(v_name_parts[2:], ' ');
+    ELSE
+      v_surname := '';
+    END IF;
+  ELSE
+    -- Try separate first_name and last_name fields
+    v_name := COALESCE(NEW.raw_user_meta_data->>'first_name', NULL);
+    v_surname := COALESCE(NEW.raw_user_meta_data->>'last_name', '');
+    
+    -- If still no name, use "User"
+    IF v_name IS NULL OR v_name = '' THEN
+      v_name := 'User';
+    END IF;
+  END IF;
+
+  -- Ensure surname has a value (default to empty string)
+  IF v_surname IS NULL THEN
+    v_surname := '';
+  END IF;
+
+  -- Insert or update the profile with smart conflict resolution
+  INSERT INTO public.profiles (id, email, name, surname, preferred_team)
   VALUES (
     NEW.id,
     NEW.email,
-    COALESCE(NEW.raw_user_meta_data->>'name', 'User')
+    v_name,
+    v_surname,
+    COALESCE(NEW.raw_user_meta_data->>'preferred_team', NULL)
   )
   ON CONFLICT (id) DO UPDATE SET
     email = EXCLUDED.email,
-    name = COALESCE(EXCLUDED.name, profiles.name),
+    name = CASE 
+      WHEN profiles.name = 'User' AND EXCLUDED.name != 'User' THEN EXCLUDED.name
+      ELSE profiles.name
+    END,
+    surname = CASE
+      WHEN profiles.surname = '' AND EXCLUDED.surname != '' THEN EXCLUDED.surname
+      ELSE profiles.surname
+    END,
+    preferred_team = COALESCE(EXCLUDED.preferred_team, profiles.preferred_team),
     updated_at = NOW();
+
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;

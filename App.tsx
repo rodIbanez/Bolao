@@ -7,6 +7,7 @@ import MatchList from './components/MatchList';
 import ProfileSetup from './components/ProfileSetup';
 import Leaderboard from './components/Leaderboard';
 import GroupSelector from './components/GroupSelector';
+import GroupDashboard from './components/GroupDashboard';
 import Rules from './components/Rules';
 import { supabase } from './supabase';
 
@@ -16,9 +17,25 @@ const App: React.FC = () => {
   const [showProfileSetup, setShowProfileSetup] = useState(false);
   const [activeTab, setActiveTab] = useState<'matches' | 'ranking' | 'groups' | 'rules'>('matches');
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
+  const [viewingGroupDashboard, setViewingGroupDashboard] = useState(false);
   const [scoringRules, setScoringRules] = useState<ScoringConfig>(INITIAL_SCORING_RULES);
 
   const t = TRANSLATIONS[lang];
+
+  // Helper to get current user ID
+  const getCurrentUserId = async (): Promise<string | null> => {
+    const { data } = await supabase.auth.getSession();
+    return data?.session?.user?.id || null;
+  };
+
+  // DIAGNOSTIC: Log state changes for debugging
+  useEffect(() => {
+    console.log('📊 APP STATE UPDATE:');
+    console.log('  - activeTab:', activeTab);
+    console.log('  - viewingGroupDashboard:', viewingGroupDashboard);
+    console.log('  - activeGroupId:', activeGroupId);
+    console.log('  - user:', user);
+  }, [activeTab, viewingGroupDashboard, activeGroupId]);
 
   useEffect(() => {
     // Initialize DB with Mock users for reveal testing if empty
@@ -186,6 +203,7 @@ const App: React.FC = () => {
         }
 
         const loggedUser: User = {
+          id: data.user.id,
           email: profile.email,
           name: profile.name || 'User',
           surname: profile.surname || '',
@@ -296,6 +314,7 @@ const App: React.FC = () => {
 
         // Use the fetched profile or fallback data
         const newUser: User = {
+          id: data.user.id,
           email: profile?.email || registerEmail,
           name: profile?.name || 'User',
           surname: profile?.surname || '',
@@ -574,8 +593,7 @@ const App: React.FC = () => {
                 ) : (
                   <MatchList 
                     lang={lang} 
-                    userPredictions={user.predictions} 
-                    onSavePrediction={updatePrediction} 
+                    groupId={activeGroupId} 
                   />
                 )}
               </>
@@ -589,19 +607,52 @@ const App: React.FC = () => {
               />
             )}
 
-            {activeTab === 'groups' && (
+            {activeTab === 'groups' && !viewingGroupDashboard && (
               <GroupSelector 
                 lang={lang} 
                 userGroupIds={user.groupIds} 
                 activeGroupId={activeGroupId}
                 currentUserEmail={user.email}
                 onSelectGroup={(id) => {
+                  console.log('🔍 Group selected:', id);
+                  console.log('🔍 Current user:', user);
+                  console.log('🔍 User ID:', user.id);
                   setActiveGroupId(id);
-                  setActiveTab('matches');
+                  setViewingGroupDashboard(true);
                 }}
                 onJoinGroup={handleJoinGroup}
                 onCreateGroup={handleCreateGroup}
               />
+            )}
+
+            {activeTab === 'groups' && viewingGroupDashboard && activeGroupId && (
+              <GroupDashboard
+                lang={lang}
+                groupId={activeGroupId}
+                currentUserId={user.id || 'unknown'}
+                onNavigateToMatches={() => {
+                  setViewingGroupDashboard(false);
+                  setActiveTab('matches');
+                }}
+                onBack={() => setViewingGroupDashboard(false)}
+              />
+            )}
+
+            {/* DIAGNOSTIC: Fallback for edge cases */}
+            {activeTab === 'groups' && viewingGroupDashboard && !activeGroupId && (
+              <div className="bg-yellow-50 border-2 border-yellow-500 rounded-2xl p-8 text-center">
+                <p className="text-yellow-800 font-bold text-lg">⚠️ DEBUG: No Active Group ID</p>
+                <p className="text-yellow-600 text-sm mt-2">viewingGroupDashboard is true but activeGroupId is missing</p>
+                <button 
+                  onClick={() => {
+                    console.log('🔧 Resetting to groups list');
+                    setViewingGroupDashboard(false);
+                  }}
+                  className="mt-4 bg-yellow-500 text-white px-6 py-2 rounded-xl font-bold"
+                >
+                  Reset to Groups List
+                </button>
+              </div>
             )}
 
             {activeTab === 'rules' && (
@@ -632,7 +683,11 @@ const App: React.FC = () => {
             {t.ranking.toUpperCase()}
           </button>
           <button 
-            onClick={() => setActiveTab('groups')}
+            onClick={() => {
+              console.log('📱 Groups tab clicked');
+              setViewingGroupDashboard(false); // Reset to list view when clicking tab
+              setActiveTab('groups');
+            }}
             className={`flex-1 flex flex-col items-center justify-center gap-1 py-3 rounded-2xl text-[9px] font-black transition-all ${activeTab === 'groups' ? 'bg-slate-900 text-white shadow-lg scale-105' : 'text-slate-400 hover:bg-slate-50'}`}
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -3,6 +3,7 @@ export type Language = 'pt' | 'en' | 'es';
 export type GroupRole = 'OWNER' | 'ADMIN' | 'MEMBER';
 
 export interface User {
+  id?: string; // Supabase user ID
   email: string;
   name: string;
   surname: string;
@@ -59,6 +60,7 @@ export interface Match {
   group: string;
   actualHomeScore?: number;
   actualAwayScore?: number;
+  status?: string; // SCHEDULED, TIMED, IN_PLAY, PAUSED, FINISHED, etc.
 }
 
 export interface ScoringConfig {

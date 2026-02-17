@@ -6,10 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "sync-matches": "node api/update-matches-standalone.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.95.3",
+    "dotenv": "^17.3.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },

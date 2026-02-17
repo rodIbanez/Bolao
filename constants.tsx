@@ -19,6 +19,39 @@ export const TEAMS: Record<string, Team> = {
   POR: { id: 'POR', name: { pt: 'Portugal', en: 'Portugal', es: 'Portugal' }, flag: '🇵🇹', color: '#E42518' },
   IRL: { id: 'IRL', name: { pt: 'Irlanda', en: 'Ireland', es: 'Irlanda' }, flag: '🇮🇪', color: '#169B62' },
   CAN: { id: 'CAN', name: { pt: 'Canadá', en: 'Canada', es: 'Canadá' }, flag: '🇨🇦', color: '#FF0000' },
+  SRB: { id: 'SRB', name: { pt: 'Sérvia', en: 'Serbia', es: 'Serbia' }, flag: '🇷🇸', color: '#C6363C' },
+  KSA: { id: 'KSA', name: { pt: 'Arábia Saudita', en: 'Saudi Arabia', es: 'Arabia Saudita' }, flag: '🇸🇦', color: '#165C3A' },
+  AUS: { id: 'AUS', name: { pt: 'Austrália', en: 'Australia', es: 'Australia' }, flag: '🇦🇺', color: '#00843D' },
+  CMR: { id: 'CMR', name: { pt: 'Camarões', en: 'Cameroon', es: 'Camerún' }, flag: '🇨🇲', color: '#007A3D' },
+};
+
+/**
+ * Helper function to lookup team flag by team name or ID
+ * @param teamName - Team name in any language (pt/en/es) or team ID
+ * @returns Flag emoji or fallback '🏳️' if not found
+ */
+export const getTeamFlag = (teamName: string): string => {
+  if (!teamName) return '🏳️';
+
+  const normalizedSearch = teamName.toLowerCase().trim();
+
+  // First, try direct ID match (case-insensitive)
+  const directMatch = Object.values(TEAMS).find(
+    team => team.id.toLowerCase() === normalizedSearch
+  );
+  if (directMatch) return directMatch.flag;
+
+  // Then, search by name in any language
+  const nameMatch = Object.values(TEAMS).find(
+    team => 
+      team.name.pt.toLowerCase() === normalizedSearch ||
+      team.name.en.toLowerCase() === normalizedSearch ||
+      team.name.es.toLowerCase() === normalizedSearch
+  );
+  if (nameMatch) return nameMatch.flag;
+
+  // Fallback: white flag
+  return '🏳️';
 };
 
 // Fixed missing properties in MOCK_GROUPS to satisfy the Group interface

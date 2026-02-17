@@ -18,12 +18,25 @@ const MatchCard: React.FC<MatchCardProps> = ({ match, lang, prediction, onClick 
   const startTime = new Date(match.startTime);
   const now = new Date();
   
-  // Calculate Status
+  // Get Status from Database
   const getMatchStatus = (): MatchStatus => {
-    // If we have actual scores and match was a while ago, it's finished
+    // Use database status if available
+    if (match.status) {
+      const dbStatus = match.status.toUpperCase();
+      
+      // Map API statuses to UI states
+      if (dbStatus === 'FINISHED') return 'FINISHED';
+      if (dbStatus === 'IN_PLAY' || dbStatus === 'PAUSED') return 'LIVE';
+      if (dbStatus === 'SCHEDULED' || dbStatus === 'TIMED') return 'SCHEDULED';
+      
+      // Handle other statuses (POSTPONED, SUSPENDED, CANCELLED) as finished
+      if (['POSTPONED', 'SUSPENDED', 'CANCELLED'].includes(dbStatus)) return 'FINISHED';
+    }
+    
+    // Fallback to time-based logic for legacy matches
     if (match.actualHomeScore !== undefined && match.actualAwayScore !== undefined) {
       const matchAge = now.getTime() - startTime.getTime();
-      if (matchAge > 120 * 60 * 1000) return 'FINISHED'; // Finished after 2 hours
+      if (matchAge > 120 * 60 * 1000) return 'FINISHED';
       if (matchAge >= 0) return 'LIVE';
     }
     if (now >= startTime) return 'LIVE';
@@ -80,8 +93,8 @@ const MatchCard: React.FC<MatchCardProps> = ({ match, lang, prediction, onClick 
 
   return (
     <div className={`relative w-full overflow-hidden rounded-[2.5rem] border transition-all duration-500 shadow-sm ${
-      status === 'LIVE' ? 'ring-2 ring-red-500 ring-offset-2 animate-pulse-slow' : 'border-slate-100'
-    } ${status === 'FINISHED' ? 'bg-slate-50/50 opacity-90' : 'bg-white'}`}>
+      status === 'LIVE' ? 'ring-2 ring-red-500 ring-offset-2 bg-white' : 'border-slate-100'
+    } ${status === 'FINISHED' ? 'bg-slate-50/50 opacity-75' : 'bg-white'}`}>
       
       {/* Top Decoration */}
       <div 
@@ -100,18 +113,22 @@ const MatchCard: React.FC<MatchCardProps> = ({ match, lang, prediction, onClick 
           <div className="flex gap-2 items-center">
              {status === 'LIVE' && (
                <div className="flex items-center gap-1.5 bg-red-500 text-white px-3 py-1 rounded-full animate-pulse">
-                 <span className="w-1.5 h-1.5 rounded-full bg-white"></span>
-                 <span className="text-[10px] font-black uppercase tracking-widest">LIVE</span>
+                 <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping"></span>
+                 <span className="text-[10px] font-black uppercase tracking-widest">AO VIVO</span>
                </div>
              )}
              {status === 'FINISHED' && (
                <div className="bg-slate-800 text-white px-3 py-1 rounded-full">
-                 <span className="text-[10px] font-black uppercase tracking-widest">FINISHED</span>
+                 <span className="text-[10px] font-black uppercase tracking-widest">
+                   {lang === 'pt' ? 'ENCERRADO' : lang === 'es' ? 'TERMINADO' : 'FT'}
+                 </span>
                </div>
              )}
              {status === 'SCHEDULED' && (
                <div className="bg-slate-100 text-slate-500 px-3 py-1 rounded-full">
-                 <span className="text-[10px] font-black uppercase tracking-widest">{formatTime(startTime)}</span>
+                 <span className="text-[10px] font-black uppercase tracking-widest">
+                   {new Intl.DateTimeFormat(lang, { hour: '2-digit', minute: '2-digit' }).format(startTime)}
+                 </span>
                </div>
              )}
           </div>
